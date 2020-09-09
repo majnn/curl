@@ -31,6 +31,7 @@
 #include "tool_homedir.h"
 #include "tool_msgs.h"
 #include "tool_parsecfg.h"
+#include "dynbuf.h"
 
 #include "memdebug.h" /* keep this as LAST include */
 
@@ -39,7 +40,9 @@
 #define ISSEP(x,dash) (!dash && (((x) == '=') || ((x) == ':')))
 
 static const char *unslashquote(const char *line, char *param);
-static char *my_get_line(FILE *fp);
+
+#define MAX_CONFIG_LINE_LENGTH (100*1024)
+static bool my_get_line(FILE *fp, struct curlx_dynbuf *);
 
 #ifdef WIN32
 static FILE *execpath(const char *filename)
@@ -135,17 +138,22 @@ int parseconfig(const char *filename, struct GlobalConfig *global)
 
   if(file) {
     char *line;
-    char *aline;
     char *option;
     char *param;
     int lineno = 0;
     bool dashed_option;
+    struct curlx_dynbuf buf;
+    curlx_dyn_init(&buf, MAX_CONFIG_LINE_LENGTH);
 
-    while(NULL != (aline = my_get_line(file))) {
+    while(my_get_line(file, &buf)) {
       int res;
       bool alloced_param = FALSE;
       lineno++;
-      line = aline;
+      line = curlx_dyn_ptr(&buf);
+      if(!line) {
+        rc = 1; /* out of memory */
+        break;
+      }
 
       /* line with # in the first non-blank column is a comment! */
       while(*line && ISSPACE(*line))
@@ -158,7 +166,7 @@ int parseconfig(const char *filename, struct GlobalConfig *global)
       case '\n':
       case '*':
       case '\0':
-        Curl_safefree(aline);
+        curlx_dyn_reset(&buf);
         continue;
       }
 
@@ -190,7 +198,6 @@ int parseconfig(const char *filename, struct GlobalConfig *global)
         param = malloc(strlen(line) + 1); /* parameter */
         if(!param) {
           /* out of memory */
-          Curl_safefree(aline);
           rc = 1;
           break;
         }
@@ -280,8 +287,9 @@ int parseconfig(const char *filename, struct GlobalConfig *global)
       if(alloced_param)
         Curl_safefree(param);
 
-      Curl_safefree(aline);
+      curlx_dyn_reset(&buf);
     }
+    curlx_dyn_free(&buf);
     if(file != stdin)
       fclose(file);
   }
@@ -335,39 +343,21 @@ static const char *unslashquote(const char *line, char *param)
 
 /*
  * Reads a line from the given file, ensuring is NUL terminated.
- * The pointer must be freed by the caller.
- * NULL is returned on an out of memory condition.
+ * FALSE is returned on an out of memory condition.
  */
-static char *my_get_line(FILE *fp)
+static bool my_get_line(FILE *fp, struct curlx_dynbuf *db)
 {
   char buf[4096];
   char *nl = NULL;
-  char *line = NULL;
 
   do {
     if(NULL == fgets(buf, sizeof(buf), fp))
-      break;
-    if(!line) {
-      line = strdup(buf);
-      if(!line)
-        return NULL;
-    }
-    else {
-      char *ptr;
-      size_t linelen = strlen(line);
-      ptr = realloc(line, linelen + strlen(buf) + 1);
-      if(!ptr) {
-        Curl_safefree(line);
-        return NULL;
-      }
-      line = ptr;
-      strcpy(&line[linelen], buf);
-    }
-    nl = strchr(line, '\n');
+      return FALSE;
+    nl = strchr(buf, '\n');
+    if(curlx_dyn_add(db, buf))
+      /* failure */
+      return FALSE;
   } while(!nl);
 
-  if(nl)
-    *nl = '\0';
-
-  return line;
+  return TRUE; /* suceess */
 }
