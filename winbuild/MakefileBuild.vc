@@ -620,7 +620,7 @@ CURL_FROM_LIBCURL=$(CURL_DIROBJ)\tool_hugehelp.obj \
  $(CURL_DIROBJ)\warnless.obj \
  $(CURL_DIROBJ)\curl_ctype.obj \
  $(CURL_DIROBJ)\curl_multibyte.obj \
- $(CURL_DIROBJ)\version_win32.obj
+ $(CURL_DIROBJ)\version_win32.obj \
  $(CURL_DIROBJ)\dynbuf.obj
  
 $(PROGRAM_NAME): $(CURL_DIROBJ) $(CURL_FROM_LIBCURL) $(EXE_OBJS)
